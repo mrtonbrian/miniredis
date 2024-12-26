@@ -137,6 +137,88 @@ func handleConnection(conn net.Conn) error {
 	}
 }
 
+func handleConnectionPipelined(conn net.Conn) error {
+	defer conn.Close()
+	respReader := NewRESPReader(conn)
+	respWriter := NewRESPWriter(conn)
+
+	// Increase read buffer size to handle multiple commands
+	if tc, ok := conn.(*net.TCPConn); ok {
+		tc.SetReadBuffer(64 * 1024)
+		tc.SetNoDelay(true)
+	}
+
+	for {
+		// Read as many commands as we can in one go
+		var commands []*RESPArray
+		for {
+			value, err := respReader.ReadValue()
+			if err != nil {
+				if err == io.EOF {
+					return nil
+				}
+				// If we hit a syscall.EAGAIN or similar, we've read all available data
+				if err, ok := err.(*net.OpError); ok && err.Timeout() {
+					break
+				}
+				return fmt.Errorf("reading value: %w", err)
+			}
+
+			commandArray, ok := value.(*RESPArray)
+			if !ok {
+				return fmt.Errorf("expected array, got %T", value)
+			}
+			commands = append(commands, commandArray)
+
+			// Check if reader's buffer is empty
+			if respReader.reader.Buffered() == 0 {
+				break
+			}
+		}
+
+		// Process all commands we read
+		for _, commandArray := range commands {
+			command, err := ParseCommand(commandArray)
+			if err != nil {
+				if err := respWriter.WriteError(err); err != nil {
+					return fmt.Errorf("writing error: %w", err)
+				}
+				continue
+			}
+
+			var result MiniRedisData
+			var handlerErr error
+
+			switch command.Type {
+			case SET:
+				result, handlerErr = handleSet(command.Args)
+			case GET:
+				result, handlerErr = handleGet(command.Args)
+			case ECHO:
+				result, handlerErr = handleEcho(command.Args)
+			default:
+				handlerErr = fmt.Errorf("unsupported command")
+			}
+
+			if handlerErr != nil {
+				if err := respWriter.WriteError(handlerErr); err != nil {
+					return fmt.Errorf("writing error: %w", err)
+				}
+				continue
+			}
+
+			if err := respWriter.WriteValue(result); err != nil {
+				return fmt.Errorf("writing response: %w", err)
+			}
+		}
+
+		// Flush all responses together
+		if err := respWriter.writer.Flush(); err != nil {
+			return fmt.Errorf("flushing: %w", err)
+		}
+	}
+}
+
 func StartServer(addr string) error {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -154,7 +236,7 @@ func StartServer(addr string) error {
 		}
 
 		go func() {
-			if err := handleConnection(conn); err != nil {
+			if err := handleConnectionPipelined(conn); err != nil {
 				// log.Printf("error handling connection: %v", err)
 			}
 		}()
