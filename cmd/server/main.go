@@ -12,6 +12,6 @@ func main() {
 
 	err := miniredis.StartServer(addr)
 	if err != nil {
-		log.Printf("Server Error: %v\n", err)
+		// log.Printf("Server Error: %v\n", err)
 	}
 }

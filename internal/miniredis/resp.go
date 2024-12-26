@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log"
 	"strconv"
 	"strings"
 )
@@ -104,7 +103,7 @@ func (r *RESPReader) ReadBulkString() (*RESPBulkString, error) {
 	r.reader.ReadByte()
 	r.reader.ReadByte()
 
-	log.Printf("Read %s\n", string(bulk))
+	// log.Printf("Read %s\n", string(bulk))
 	return &RESPBulkString{data: bulk}, nil
 }
 
@@ -113,7 +112,7 @@ func (r *RESPReader) ReadSimpleString() (*RESPSimpleString, error) {
 	if err != nil {
 		return &RESPSimpleString{}, fmt.Errorf("reading simple string: %w", err)
 	}
-	log.Printf("Read %s\n", string(out))
+	// log.Printf("Read %s\n", string(out))
 	return &RESPSimpleString{data: string(out)}, nil
 }
 
@@ -145,7 +144,7 @@ func (r *RESPReader) ReadValue() (RESPData, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("Recieved %s", string([]byte{_type}))
+	// log.Printf("Recieved %s", string([]byte{_type}))
 	switch _type {
 	case '+':
 		return r.ReadSimpleString()
@@ -216,7 +215,7 @@ func (w *RESPWriter) WriteBulkString(b []byte) error {
 		_, err := w.writer.Write([]byte("$-1\r\n"))
 		return err
 	}
-	log.Printf("Writing %s\n", string(b))
+	// log.Printf("Writing %s\n", string(b))
 	w.writer.WriteString("$")
 	w.writer.WriteString(strconv.Itoa(len(b)))
 	w.writer.WriteString("\r\n")
@@ -226,7 +225,7 @@ func (w *RESPWriter) WriteBulkString(b []byte) error {
 }
 
 func (w *RESPWriter) WriteInteger(i int64) error {
-	log.Printf("Writing %d\n", i)
+	// log.Printf("Writing %d\n", i)
 	w.writer.WriteString(":")
 	w.writer.WriteString(strconv.FormatInt(i, 10))
 	w.writer.WriteString("\r\n")

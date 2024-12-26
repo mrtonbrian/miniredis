@@ -11,7 +11,7 @@ import (
 var store = NewConcurrentMap[string, MiniRedisObject]()
 
 func handleSet(args []RESPData) (MiniRedisData, error) {
-	log.Println("Encountered Set")
+	// log.Println("Encountered Set")
 	if len(args) < 2 {
 		return nil, fmt.Errorf("SET command requires at least 2 arguments")
 	}
@@ -37,7 +37,7 @@ func handleSet(args []RESPData) (MiniRedisData, error) {
 }
 
 func handleGet(args []RESPData) (MiniRedisData, error) {
-	log.Println("Encountered Get")
+	// log.Println("Encountered Get")
 	if len(args) != 1 {
 		return nil, fmt.Errorf("GET command requires exactly 1 argument")
 	}
@@ -61,7 +61,7 @@ func handleGet(args []RESPData) (MiniRedisData, error) {
 }
 
 func handleEcho(args []RESPData) (MiniRedisData, error) {
-	log.Println("Encountered Echo")
+	// log.Println("Encountered Echo")
 	if len(args) != 1 {
 		return nil, fmt.Errorf("ECHO command requires exactly 1 argument")
 	}
@@ -80,7 +80,7 @@ func handleConnection(conn net.Conn) error {
 	respWriter := NewRESPWriter(conn)
 
 	for {
-		log.Println("Handling new command")
+		// log.Println("Handling new command")
 		value, err := respReader.ReadValue()
 		if err != nil {
 			if err == io.EOF {
@@ -96,7 +96,7 @@ func handleConnection(conn net.Conn) error {
 			return fmt.Errorf("expected array, got %T", value)
 		}
 
-		log.Println("Read command")
+		// log.Println("Read command")
 
 		// Parse the command
 		command, err := ParseCommand(commandArray)
@@ -104,7 +104,7 @@ func handleConnection(conn net.Conn) error {
 			return fmt.Errorf("parsing command: %w", err)
 		}
 
-		log.Println("Parsed command")
+		// log.Println("Parsed command")
 
 		var result MiniRedisData
 		var handlerErr error
@@ -120,7 +120,7 @@ func handleConnection(conn net.Conn) error {
 			handlerErr = fmt.Errorf("unsupported command")
 		}
 
-		log.Println("Finished handling command")
+		// log.Println("Finished handling command")
 
 		if handlerErr != nil {
 			if err := respWriter.WriteError(handlerErr); err != nil {
@@ -149,13 +149,13 @@ func StartServer(addr string) error {
 		conn, err := listener.Accept()
 
 		if err != nil {
-			log.Printf("failed to accept connection: %v", err)
+			// log.Printf("failed to accept connection: %v", err)
 			continue
 		}
 
 		go func() {
 			if err := handleConnection(conn); err != nil {
-				log.Printf("error handling connection: %v", err)
+				// log.Printf("error handling connection: %v", err)
 			}
 		}()
 	}
