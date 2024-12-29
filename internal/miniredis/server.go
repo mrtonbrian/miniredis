@@ -76,7 +76,7 @@ func handleEcho(args []RESPData) (MiniRedisData, error) {
 
 	return &StringData{data: arg}, nil
 }
-func handleConnection(conn net.Conn) error {
+func HandleConnection(conn net.Conn) error {
 	defer conn.Close()
 
 	// Initialize RESPReader with 4kb buffer
@@ -148,7 +148,7 @@ func StartServer(addr string) error {
 		}
 
 		go func() {
-			if err := handleConnection(conn); err != nil {
+			if err := HandleConnection(conn); err != nil {
 				log.Printf("error handling connection: %v", err)
 			}
 		}()

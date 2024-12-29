@@ -1,3 +1,6 @@
+//go:build test
+// +build test
+
 package miniredis
 
 import (
@@ -34,7 +37,7 @@ func startTestServer(t *testing.T) (string, func()) {
 				}
 			}
 			go func(c net.Conn) {
-				if err := handleConnection(c); err != nil {
+				if err := HandleConnection(c); err != nil {
 					log.Println(err)
 				}
 			}(conn)

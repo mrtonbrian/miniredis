@@ -22,8 +22,8 @@ func (c *ConcurrentMap[K, T]) Get(key *K) (T, bool) {
 	c.Mutex.RLock()
 	defer c.Mutex.RUnlock()
 
-	val, ok := c.Map[*key]
-	if !ok {
+	val, exists := c.Map[*key]
+	if !exists {
 		var zero T
 		return zero, false
 	}
