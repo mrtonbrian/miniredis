@@ -1,0 +1,6 @@
+coverage:
+  round: nearest
+  range: 50..75
+  parsers:
+    go:
+      partials_as_hits: true
