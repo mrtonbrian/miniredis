@@ -1,4 +1,7 @@
 # miniredis
+![Build and Test](https://github.com/mrtonbrian/miniredis/actions/workflows/workflow.yml/badge.svg) 
+[![codecov](https://codecov.io/gh/mrtonbrian/miniredis/graph/badge.svg?token=SDMKUHQ5JW)](https://codecov.io/gh/mrtonbrian/miniredis)
+
 A mini version of Redis written in Go. Should hopefully be faster than Redis (due to concurrency and not needing to handle as much).
 
 ## Benchmark
