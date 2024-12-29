@@ -22,12 +22,13 @@ Will improve this soon!
 - [x] Write some basic parser for RESP
 - [x] Get an MVP of basic SET / GET functionality
 - [x] Run initial `redis-benchmark` on SET / GET
-- [ ] Match / beat redis on the basic SET / GET
+- [x] Implement pipelining
+- [ ] Run another `redis-benchmark` (with / without pipelining)
+- [ ] Match / beat redis on the basic SET / GET with pipelining
+    - Optional: Match / beat redis on the basic SET / GET without pipelining
 - [ ] Implement expiry
 - [ ] Implement RDB
 - [ ] Implement lists
-- [ ] Implement pipelining
-- [ ] Run another `redis-benchmark` (with / without pipelining)
 - [ ] Implement transactions
 - [ ] Move to IO_URING
 - [ ] Swap map library(?)

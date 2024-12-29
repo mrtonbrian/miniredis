@@ -2,6 +2,7 @@ package miniredis
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -18,16 +19,20 @@ const (
 )
 
 type RESPReader struct {
-	reader bufio.Reader
+	reader     io.Reader
+	buffer     []byte
+	readIndex  int
+	writeIndex int
 }
 
 type RESPWriter struct {
 	writer bufio.Writer
 }
 
-func NewRESPReader(conn io.Reader) *RESPReader {
+func NewRESPReader(conn io.Reader, initialBufferSize int) *RESPReader {
 	return &RESPReader{
-		reader: *bufio.NewReader(conn),
+		reader: conn,
+		buffer: make([]byte, initialBufferSize),
 	}
 }
 
@@ -37,23 +42,44 @@ func NewRESPWriter(conn io.Writer) *RESPWriter {
 	}
 }
 
-type RESPData interface{ DataType() RESPDataType }
+type RESPData interface {
+	DataType() RESPDataType
+	Dump() string // Mainly for debugging
+}
 
 type RESPSimpleString struct{ data string }
 
 func (s *RESPSimpleString) DataType() RESPDataType { return SimpleString }
+func (s *RESPSimpleString) Dump() string           { return s.data }
 
 type RESPBulkString struct{ data []byte }
 
 func (s *RESPBulkString) DataType() RESPDataType { return BulkString }
+func (s *RESPBulkString) Dump() string           { return string(s.data) }
 
 type RESPInteger struct{ data int64 }
 
 func (s *RESPInteger) DataType() RESPDataType { return Integer }
+func (s *RESPInteger) Dump() string           { return strconv.FormatInt(s.data, 10) }
 
 type RESPArray struct{ data []RESPData }
 
 func (s *RESPArray) DataType() RESPDataType { return Array }
+func (s *RESPArray) Dump() string {
+	var stringsArr []string
+	for _, elem := range s.data {
+		stringsArr = append(stringsArr, elem.Dump())
+	}
+	return fmt.Sprintf("[%s]", strings.Join(stringsArr, ","))
+}
+
+func DumpRESPDataArray(lst []RESPData) string {
+	var stringsArr []string
+	for _, elem := range lst {
+		stringsArr = append(stringsArr, elem.Dump())
+	}
+	return fmt.Sprintf("[%s]", strings.Join(stringsArr, ","))
+}
 
 type RESPCommandType int16
 
@@ -68,100 +94,248 @@ type RESPCommand struct {
 	Args []RESPData
 }
 
-func (r *RESPReader) ReadInteger() (*RESPInteger, error) {
-	line, _, err := r.reader.ReadLine()
+var ErrIncompleteRESPValue = errors.New("incomplete RESP value")
+
+// Reads commands in from r.reader, handles buffering. Meant to be called in a loop
+func (r *RESPReader) ReadCommands() ([]RESPCommand, error) {
+	r.shiftBuffer()
+
+	r.growBuffer()
+
+	numReadBytes, err := r.reader.Read(r.buffer[r.writeIndex:])
+
 	if err != nil {
-		return &RESPInteger{}, fmt.Errorf("reading integer: %w", err)
-	}
+		// We've read to the end of the stream, just parse commands in buffer
+		if err == io.EOF {
+			commands, parseErr := r.parseBufferCommands()
+			if parseErr != nil {
+				return commands, parseErr
+			}
 
-	val, err := strconv.ParseInt(string(line), 10, 64)
-	if err != nil {
-		return &RESPInteger{}, fmt.Errorf("parsing integer: %w", err)
-	}
-
-	return &RESPInteger{data: val}, nil
-}
-
-func (r *RESPReader) ReadBulkString() (*RESPBulkString, error) {
-	length, err := r.ReadInteger()
-	if err != nil {
-		return &RESPBulkString{}, fmt.Errorf("reading length of bulk string: %w", err)
-	}
-
-	if length.data < 0 {
-		return &RESPBulkString{}, nil
-	}
-
-	bulk := make([]byte, length.data)
-	_, err = r.reader.Read(bulk)
-	if err != nil {
-		return &RESPBulkString{}, fmt.Errorf("reading bulk string: %w", err)
-	}
-
-	// Read \r\n at the end of the bulk string
-
-	r.reader.ReadByte()
-	r.reader.ReadByte()
-
-	// log.Printf("Read %s\n", string(bulk))
-	return &RESPBulkString{data: bulk}, nil
-}
-
-func (r *RESPReader) ReadSimpleString() (*RESPSimpleString, error) {
-	out, _, err := r.reader.ReadLine()
-	if err != nil {
-		return &RESPSimpleString{}, fmt.Errorf("reading simple string: %w", err)
-	}
-	// log.Printf("Read %s\n", string(out))
-	return &RESPSimpleString{data: string(out)}, nil
-}
-
-func (r *RESPReader) ReadArray() (*RESPArray, error) {
-	length, err := r.ReadInteger()
-	if err != nil {
-		return &RESPArray{}, fmt.Errorf("reading length of array: %w", err)
-	}
-
-	if length.data < 0 {
-		return &RESPArray{}, nil
-	}
-
-	arr := make([]RESPData, length.data)
-
-	for i := 0; i < int(length.data); i++ {
-		data, err := r.ReadValue()
-		if err != nil {
-			return &RESPArray{}, fmt.Errorf("reading array element: %w", err)
+			// Return EOF to caller
+			return commands, io.EOF
 		}
-		arr[i] = data
+
+		return nil, fmt.Errorf("reading from reader: %w", err)
 	}
 
-	return &RESPArray{data: arr}, nil
+	r.writeIndex += numReadBytes
+
+	return r.parseBufferCommands()
 }
 
-func (r *RESPReader) ReadValue() (RESPData, error) {
-	_type, err := r.reader.ReadByte()
-	if err != nil {
-		return nil, err
+// Shifts buffer to start at 0
+func (r *RESPReader) shiftBuffer() {
+	// Read everything in buffer, just reset indices
+	if r.readIndex == r.writeIndex {
+		r.readIndex = 0
+		r.writeIndex = 0
+		return
 	}
-	// log.Printf("Recieved %s", string([]byte{_type}))
-	switch _type {
-	case '+':
-		return r.ReadSimpleString()
+
+	// If we've consumed something, then shift everything over
+	if r.readIndex > 0 {
+		leftoverLength := r.writeIndex - r.readIndex
+		copy(r.buffer, r.buffer[r.readIndex:r.writeIndex])
+		r.readIndex = 0
+		r.writeIndex = leftoverLength
+	}
+}
+
+// Grows buffer (double size) if it's too full (< 25% space remaining).
+// Written to handle case where r.readIndex is not 0 (although only called in the case where it definitely is).
+func (r *RESPReader) growBuffer() {
+	size := len(r.buffer)
+	used := r.writeIndex - r.readIndex
+	free := size - used
+
+	if free <= size/4 {
+		newBuf := make([]byte, size*2)
+		copy(newBuf, r.buffer[r.readIndex:r.writeIndex])
+		r.buffer = newBuf
+		r.readIndex = 0
+		r.writeIndex = used
+	}
+}
+
+// Parse all *complete* buffer commands, return as a slice
+func (r *RESPReader) parseBufferCommands() ([]RESPCommand, error) {
+	var commands []RESPCommand
+
+	for {
+		// Read everything in the buffer, so just exit loop
+		if r.readIndex >= r.writeIndex {
+			break
+		}
+
+		subBuffer := r.buffer[r.readIndex:r.writeIndex]
+		value, consumed, err := parseSingleValue(subBuffer)
+		if err != nil {
+			// Ran out of commands in the buffer, just exit loop
+			if err == ErrIncompleteRESPValue {
+				break
+			}
+
+			return commands, fmt.Errorf("parsing buffer command: %w", err)
+		}
+
+		r.readIndex += consumed
+
+		val, ok := value.(*RESPArray)
+		if !ok {
+			return commands, fmt.Errorf("error casting value to RESPArray - value datatype is %#v", value.DataType())
+		}
+
+		cmd, err := ParseCommand(val)
+		if err != nil {
+			return commands, fmt.Errorf("error parsing command: %w", err)
+		}
+		commands = append(commands, cmd)
+	}
+
+	return commands, nil
+}
+
+// Parses single RESP value from buffer
+func parseSingleValue(buf []byte) (RESPData, int, error) {
+	if len(buf) == 0 {
+		return nil, 0, ErrIncompleteRESPValue
+	}
+
+	// buffer[0] is the type
+	switch buf[0] {
 	case ':':
-		return r.ReadInteger()
+		return parseInteger(buf)
 	case '$':
-		return r.ReadBulkString()
+		return parseBulkString(buf)
+	case '+':
+		return parseSimpleString(buf)
 	case '*':
-		return r.ReadArray()
+		return parseArray(buf)
 	default:
-		return nil, fmt.Errorf("unknown data type %b", _type)
+		return nil, 0, fmt.Errorf("unknown RESP type byte: %q", buf[0])
 	}
+}
+
+// Parses integer into RESPInteger.
+// Expects X1234\r\nXXXXX (note that it ignores the first character)
+// Returns RESPInteger, how many bytes were consumed, and any errors
+// Returns IncompleteRESPValueError if not enough data inside buffer to parse integer
+func parseInteger(buf []byte) (*RESPInteger, int, error) {
+	// Find where integer ends
+	end := CLRFIndex(buf)
+
+	if end == -1 {
+		// There's more data outside the buffer that needs to be read in,
+		// Return IncompleteRESPValueError
+		return &RESPInteger{data: 0}, 0, ErrIncompleteRESPValue
+	}
+
+	intPart := string(buf[1:end])
+	data, err := strconv.ParseInt(intPart, 10, 64)
+	if err != nil {
+		return &RESPInteger{data: 0}, 0, err
+	}
+
+	// end + 2 bytes consumed in general
+	return &RESPInteger{data: data}, end + 2, nil
+}
+
+// Parses integer into RESPBulkString. Expects $len\r\nBULK\r\n
+// Returns RESPBulkString, how many bytes were consumed, and any errors.
+// Returns IncompleteRESPValueError if not enough data inside buffer to parse integer
+func parseBulkString(buf []byte) (*RESPBulkString, int, error) {
+	totalConsumed := 0
+
+	length, consumed, err := parseInteger(buf)
+	if err != nil {
+		return &RESPBulkString{data: nil}, 0, err
+	}
+
+	totalConsumed += consumed
+	parsedLength := length.data
+
+	if parsedLength < 0 {
+		return &RESPBulkString{data: nil}, totalConsumed, nil
+	}
+
+	// Entire bulkstring does not fit in buffer
+	if int64(len(buf)) < parsedLength+int64(consumed)+2 {
+		return &RESPBulkString{data: nil}, 0, ErrIncompleteRESPValue
+	}
+
+	startInd := totalConsumed
+	data := buf[startInd : startInd+int(parsedLength)]
+	totalConsumed += int(parsedLength)
+
+	// Otherwise, return bulk string
+	return &RESPBulkString{data: data}, totalConsumed + 2, nil
+}
+
+// Parses simple string into RESPSimpleString
+// Expects +ASDF\r\n
+func parseSimpleString(buf []byte) (*RESPSimpleString, int, error) {
+	end := CLRFIndex(buf)
+
+	if end == -1 {
+		return &RESPSimpleString{data: ""}, 0, ErrIncompleteRESPValue
+	}
+
+	return &RESPSimpleString{data: string(buf[1:end])}, end + 2, nil
+}
+
+// Parses array into RESPArray
+// Expects *len\r\nELEM1\r\nELEM2\r\n...\r\nELEMN\r\n
+func parseArray(buf []byte) (*RESPArray, int, error) {
+	totalConsumed := 0
+
+	length, consumed, err := parseInteger(buf)
+	if err != nil {
+		return &RESPArray{data: nil}, 0, err
+	}
+
+	totalConsumed += consumed
+	parsedLength := length.data
+
+	if parsedLength < 0 {
+		return &RESPArray{data: nil}, totalConsumed, nil
+	}
+
+	arr := make([]RESPData, parsedLength)
+
+	for i := 0; i < int(parsedLength); i++ {
+		elem, consumed, err := parseSingleValue(buf[totalConsumed:])
+
+		if err != nil {
+			return &RESPArray{data: nil}, 0, err
+		}
+
+		totalConsumed += consumed
+		arr[i] = elem
+	}
+
+	return &RESPArray{data: arr}, totalConsumed, nil
+}
+
+// Returns first index where \r\n is inside the string
+func CLRFIndex(buf []byte) int {
+	for i := 0; i < len(buf)-1; i++ {
+		if buf[i] == '\r' && buf[i+1] == '\n' {
+			return i
+		}
+	}
+
+	return -1
 }
 
 func ParseCommand(commandArray *RESPArray) (RESPCommand, error) {
 	var commandType RESPCommandType
 	var commandName string
+
+	if len(commandArray.data) == 0 {
+		return RESPCommand{}, fmt.Errorf("command array length 0")
+	}
+
 	firstArg := commandArray.data[0]
 	switch v := firstArg.(type) {
 	case *RESPSimpleString:
@@ -215,7 +389,6 @@ func (w *RESPWriter) WriteBulkString(b []byte) error {
 		_, err := w.writer.Write([]byte("$-1\r\n"))
 		return err
 	}
-	// log.Printf("Writing %s\n", string(b))
 	w.writer.WriteString("$")
 	w.writer.WriteString(strconv.Itoa(len(b)))
 	w.writer.WriteString("\r\n")
@@ -225,7 +398,6 @@ func (w *RESPWriter) WriteBulkString(b []byte) error {
 }
 
 func (w *RESPWriter) WriteInteger(i int64) error {
-	// log.Printf("Writing %d\n", i)
 	w.writer.WriteString(":")
 	w.writer.WriteString(strconv.FormatInt(i, 10))
 	w.writer.WriteString("\r\n")

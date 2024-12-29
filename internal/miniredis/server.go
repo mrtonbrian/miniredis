@@ -26,7 +26,9 @@ func handleSet(args []RESPData) (MiniRedisData, error) {
 		return nil, fmt.Errorf("invalid value: %w", err)
 	}
 
-	stringData := &StringData{data: []byte(value)}
+	byteSliceCopy := make([]byte, len(value))
+	copy(byteSliceCopy, []byte(value))
+	stringData := &StringData{data: byteSliceCopy}
 	obj := MiniRedisObject{
 		data:   stringData,
 		expiry: time.Time{},
@@ -48,6 +50,7 @@ func handleGet(args []RESPData) (MiniRedisData, error) {
 	}
 
 	value, exists := store.Get(&key)
+
 	if !exists {
 		return &StringData{data: nil}, nil
 	}
@@ -73,132 +76,28 @@ func handleEcho(args []RESPData) (MiniRedisData, error) {
 
 	return &StringData{data: arg}, nil
 }
-
 func handleConnection(conn net.Conn) error {
 	defer conn.Close()
-	respReader := NewRESPReader(conn)
+
+	// Initialize RESPReader with 4kb buffer
+	respReader := NewRESPReader(conn, 4*1024)
 	respWriter := NewRESPWriter(conn)
 
 	for {
-		// log.Println("Handling new command")
-		value, err := respReader.ReadValue()
+		commands, err := respReader.ReadCommands()
 		if err != nil {
+			// For a net.Conn, io.EOF is only returned if there's no data that was read
+			// so it's safe to just exit
 			if err == io.EOF {
-				// Client closed connection normally
 				return nil
 			}
-			return fmt.Errorf("reading value from connection: %w", err)
-		}
 
-		// Check that command is an array
-		commandArray, ok := value.(*RESPArray)
-		if !ok {
-			return fmt.Errorf("expected array, got %T", value)
-		}
-
-		// log.Println("Read command")
-
-		// Parse the command
-		command, err := ParseCommand(commandArray)
-		if err != nil {
-			return fmt.Errorf("parsing command: %w", err)
-		}
-
-		// log.Println("Parsed command")
-
-		var result MiniRedisData
-		var handlerErr error
-
-		switch command.Type {
-		case SET:
-			result, handlerErr = handleSet(command.Args)
-		case GET:
-			result, handlerErr = handleGet(command.Args)
-		case ECHO:
-			result, handlerErr = handleEcho(command.Args)
-		default:
-			handlerErr = fmt.Errorf("unsupported command")
-		}
-
-		// log.Println("Finished handling command")
-
-		if handlerErr != nil {
-			if err := respWriter.WriteError(handlerErr); err != nil {
-				return fmt.Errorf("writing error response: %w", err)
-			}
-			continue
-		}
-
-		if err := respWriter.WriteValue(result); err != nil {
-			return fmt.Errorf("writing response: %w", err)
-		}
-
-		respWriter.writer.Flush()
-	}
-}
-
-func handleConnectionPipelined(conn net.Conn) error {
-	defer conn.Close()
-	respReader := NewRESPReader(conn)
-	respWriter := NewRESPWriter(conn)
-
-	// Increase read buffer size to handle multiple commands
-	if tc, ok := conn.(*net.TCPConn); ok {
-		tc.SetReadBuffer(64 * 1024)
-		tc.SetNoDelay(true)
-	}
-
-	for {
-		// Read as many commands as we can in one go
-		var commands []*RESPArray
-		for {
-			value, err := respReader.ReadValue()
-			if err != nil {
-				if err == io.EOF {
-					return nil
-				}
-				// If we hit a syscall.EAGAIN or similar, we've read all available data
-				if err, ok := err.(*net.OpError); ok && err.Timeout() {
-					break
-				}
-				return fmt.Errorf("reading value: %w", err)
-			}
-
-			commandArray, ok := value.(*RESPArray)
-			if !ok {
-				return fmt.Errorf("expected array, got %T", value)
-			}
-			commands = append(commands, commandArray)
-
-			// Check if reader's buffer is empty
-			if respReader.reader.Buffered() == 0 {
-				break
-			}
+			return fmt.Errorf("reading commands: %w", err)
 		}
 
 		// Process all commands we read
-		for _, commandArray := range commands {
-			command, err := ParseCommand(commandArray)
-			if err != nil {
-				if err := respWriter.WriteError(err); err != nil {
-					return fmt.Errorf("writing error: %w", err)
-				}
-				continue
-			}
-
-			var result MiniRedisData
-			var handlerErr error
-
-			switch command.Type {
-			case SET:
-				result, handlerErr = handleSet(command.Args)
-			case GET:
-				result, handlerErr = handleGet(command.Args)
-			case ECHO:
-				result, handlerErr = handleEcho(command.Args)
-			default:
-				handlerErr = fmt.Errorf("unsupported command")
-			}
+		for _, cmd := range commands {
+			result, handlerErr := dispatchCommand(&cmd)
 
 			if handlerErr != nil {
 				if err := respWriter.WriteError(handlerErr); err != nil {
@@ -219,6 +118,19 @@ func handleConnectionPipelined(conn net.Conn) error {
 	}
 }
 
+func dispatchCommand(cmd *RESPCommand) (MiniRedisData, error) {
+	switch cmd.Type {
+	case SET:
+		return handleSet(cmd.Args)
+	case GET:
+		return handleGet(cmd.Args)
+	case ECHO:
+		return handleEcho(cmd.Args)
+	default:
+		return nil, fmt.Errorf("unsupported command: %v", cmd.Type)
+	}
+}
+
 func StartServer(addr string) error {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -231,13 +143,13 @@ func StartServer(addr string) error {
 		conn, err := listener.Accept()
 
 		if err != nil {
-			// log.Printf("failed to accept connection: %v", err)
+			log.Printf("failed to accept connection: %v", err)
 			continue
 		}
 
 		go func() {
-			if err := handleConnectionPipelined(conn); err != nil {
-				// log.Printf("error handling connection: %v", err)
+			if err := handleConnection(conn); err != nil {
+				log.Printf("error handling connection: %v", err)
 			}
 		}()
 	}

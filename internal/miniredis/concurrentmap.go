@@ -1,9 +1,10 @@
 package miniredis
 
-import "sync"
+import (
+	"sync"
+)
 
-// A simple concurrent map with using a RWMutex.
-// Probably will switch it out in the future, or implement sharding
+// A simple concurrent map using a RWMutex for better read concurrency
 type ConcurrentMap[K comparable, T any] struct {
 	Map   map[K]T
 	Mutex sync.RWMutex
@@ -17,20 +18,24 @@ func NewConcurrentMap[K comparable, T any]() *ConcurrentMap[K, T] {
 }
 
 // Get retrieves a value from the map
-func (c *ConcurrentMap[K, T]) Get(key *K) (*T, bool) {
+func (c *ConcurrentMap[K, T]) Get(key *K) (T, bool) {
 	c.Mutex.RLock()
 	defer c.Mutex.RUnlock()
+
 	val, ok := c.Map[*key]
 	if !ok {
-		return nil, false
+		var zero T
+		return zero, false
 	}
-	return &val, true
+
+	return val, true
 }
 
 // Set adds or updates a value in the map
 func (c *ConcurrentMap[K, T]) Set(key *K, value *T) {
 	c.Mutex.Lock()
 	defer c.Mutex.Unlock()
+
 	c.Map[*key] = *value
 }
 
@@ -41,13 +46,14 @@ func (c *ConcurrentMap[K, T]) Delete(key *K) {
 	delete(c.Map, *key)
 }
 
-// Update modifies an existing value using a function for atomicity (hopefully)
-// Return value is based on success
-func (c *ConcurrentMap[K, T]) Update(key *K, fn func(*T) *T) bool {
+// Update modifies an existing value using a function for atomicity
+// Return value indicates success
+func (c *ConcurrentMap[K, T]) Update(key *K, fn func(T) T) bool {
 	c.Mutex.Lock()
 	defer c.Mutex.Unlock()
+
 	if val, ok := c.Map[*key]; ok {
-		c.Map[*key] = *fn(&val)
+		c.Map[*key] = fn(val)
 		return true
 	}
 	return false
