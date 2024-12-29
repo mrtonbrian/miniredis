@@ -11,7 +11,6 @@ import (
 var store = NewConcurrentMap[string, MiniRedisObject]()
 
 func handleSet(args []RESPData) (MiniRedisData, error) {
-	// log.Println("Encountered Set")
 	if len(args) < 2 {
 		return nil, fmt.Errorf("SET command requires at least 2 arguments")
 	}
@@ -39,7 +38,6 @@ func handleSet(args []RESPData) (MiniRedisData, error) {
 }
 
 func handleGet(args []RESPData) (MiniRedisData, error) {
-	// log.Println("Encountered Get")
 	if len(args) != 1 {
 		return nil, fmt.Errorf("GET command requires exactly 1 argument")
 	}
@@ -64,7 +62,6 @@ func handleGet(args []RESPData) (MiniRedisData, error) {
 }
 
 func handleEcho(args []RESPData) (MiniRedisData, error) {
-	// log.Println("Encountered Echo")
 	if len(args) != 1 {
 		return nil, fmt.Errorf("ECHO command requires exactly 1 argument")
 	}
@@ -80,8 +77,8 @@ func HandleConnection(conn net.Conn) error {
 	defer conn.Close()
 
 	// Initialize RESPReader with 4kb buffer
-	respReader := NewRESPReader(conn, 4*1024)
-	respWriter := NewRESPWriter(conn)
+	respReader := NewRESPReader(conn, RESP_READER_INITIAL_BUF_SIZE)
+	respWriter := NewRESPWriter(conn, RESP_WRITER_INITIAL_BUF_SIZE)
 
 	for {
 		commands, err := respReader.ReadCommands()

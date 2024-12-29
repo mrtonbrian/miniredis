@@ -11,6 +11,9 @@ import (
 
 type RESPDataType int16
 
+const RESP_READER_INITIAL_BUF_SIZE = 4 * 1024 // 4kb
+const RESP_WRITER_INITIAL_BUF_SIZE = 4 * 1024 // 4kb
+
 const (
 	SimpleString RESPDataType = iota
 	BulkString
@@ -36,9 +39,9 @@ func NewRESPReader(conn io.Reader, initialBufferSize int) *RESPReader {
 	}
 }
 
-func NewRESPWriter(conn io.Writer) *RESPWriter {
+func NewRESPWriter(conn io.Writer, initialBufferSize int) *RESPWriter {
 	return &RESPWriter{
-		writer: *bufio.NewWriter(conn),
+		writer: *bufio.NewWriterSize(conn, initialBufferSize),
 	}
 }
 
