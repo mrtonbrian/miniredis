@@ -8,14 +8,14 @@ A mini version of Redis written in Go. Should hopefully be faster than Redis (du
 ### Actual Redis
 No disk persistence
 ```
-brianton@brianlenlaptop:~/redcon$ redis-benchmark -p 6379 -t set,get -n 10000000 -q -P 512 -c 512
+brianton@brianlenlaptop:~$ redis-benchmark -p 6379 -t set,get -n 10000000 -q -P 512 -c 512
 SET: 1704604.62 requests per second
 GET: 2375965.00 requests per second
 ```
 ### MiniRedis
 No disk persistence
 ```
-brianton@brianlenlaptop:~/redcon$ redis-benchmark -p 6379 -t set,get -n 10000000 -q -P 512 -c 512
+brianton@brianlenlaptop:~$ redis-benchmark -p 6379 -t set,get -n 10000000 -q -P 512 -c 512
 WARN: could not fetch server CONFIG
 SET: 1723040.88 requests per second
 GET: 5471556.00 requests per second
