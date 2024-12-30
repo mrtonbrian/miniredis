@@ -4,7 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/mrtonbrian/miniredis)](https://goreportcard.com/report/github.com/mrtonbrian/miniredis)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-A mini version of Redis written in Go. Slightly faster than Redis in a lot of situations. Not meant for production use.
+A mini version of Redis written in Go. Slightly faster than Redis in some situations. Not meant for production use.
 
 ## Benchmark
 Here is a mini benchmark on basic `SET`/`GET` commands that I ran on my laptop.
