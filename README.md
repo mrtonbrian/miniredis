@@ -6,29 +6,28 @@ A mini version of Redis written in Go. Should hopefully be faster than Redis (du
 
 ## Benchmark
 ### Actual Redis
-No pipelining, no disk persistence
+No disk persistence
 ```
-brianton@brian-mini:~$ redis-benchmark -p 6379 -t set,get -n 1000000 -q -c 512
-SET: 44616.96 requests per second, p50=5.463 msec
-GET: 44748.73 requests per second, p50=5.383 msec
+brianton@brianlenlaptop:~/redcon$ redis-benchmark -p 6379 -t set,get -n 10000000 -q -P 512 -c 512
+SET: 1704604.62 requests per second
+GET: 2375965.00 requests per second
 ```
 ### MiniRedis
-No pipelining, no disk persistence
+No disk persistence
 ```
-brianton@brian-mini:~$ redis-benchmark -p 6379 -t set,get -n 1000000 -q -c 512
-WARNING: Could not fetch server CONFIG
-SET: 36330.61 requests per second, p50=7.063 msec
-GET: 36670.33 requests per second, p50=6.991 msec
+brianton@brianlenlaptop:~/redcon$ redis-benchmark -p 6379 -t set,get -n 10000000 -q -P 512 -c 512
+WARN: could not fetch server CONFIG
+SET: 1723040.88 requests per second
+GET: 5471556.00 requests per second
 ```
-Will improve this soon!
+Speedup for `GET` is mostly due to concurrency, I believe (entire table is locked for `SET`, so not much speedup in that case). Should be improved with a sharded concurrent map library?
 ## TODO list
 - [x] Write some basic parser for RESP
 - [x] Get an MVP of basic SET / GET functionality
 - [x] Run initial `redis-benchmark` on SET / GET
 - [x] Implement pipelining
-- [ ] Run another `redis-benchmark` (with / without pipelining)
-- [ ] Match / beat redis on the basic SET / GET with pipelining
-    - Optional: Match / beat redis on the basic SET / GET without pipelining
+- [x] Run another `redis-benchmark`
+- [x] Match / beat redis on the basic SET / GET
 - [ ] Implement expiry
 - [ ] Implement RDB
 - [ ] Implement lists
