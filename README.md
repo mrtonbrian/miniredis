@@ -31,7 +31,10 @@ WARN: could not fetch server CONFIG
 SET: 1723040.88 requests per second
 GET: 5471556.00 requests per second
 ```
-Speedup for `GET` is mostly due to concurrency, I believe (entire table is locked for `SET`, so not much speedup in that case). Could be improved with a sharded concurrent map library?
+Speedup for `GET` is mostly due to concurrency, I believe (entire table is locked for `SET`, so not much speedup in that case). Could be improved with a sharded concurrent map library? My initial trials say no, but intuitively, it should work.
+
+Also do take these benchmarks with a grain of salt - these were done on the Lenovo Yoga Slim 7i Aura edition (Intel Ultra 7 258v, 32GB), but definitely not a sanitized environment (many processes open in the background). Here, I believe we're benefitting a lot from the 8 cores and high memory speed (due to the memory being on the CPU package itself). Thus, your mileage may vary, and definitely do **not** use this for production.
+
 ## TODO list
 - [x] Write some basic parser for RESP
 - [x] Get an MVP of basic SET / GET functionality
